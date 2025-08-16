@@ -1,0 +1,165 @@
+//@version=5
+indicator("📊 trend power + Ichimoku + Volume + VWAP + VWMA (با امتیازدهی)", overlay=true)
+
+// ===================================================================
+//                            ورودی‌ها
+// ===================================================================
+length = input.int(14, title="بازه بررسی قدرت")
+smaLength = input.int(50, title="طول میانگین روند")
+vwmaLength = input.int(20, title="طول میانگin حجمی (VWMA)") // ورودی جدید برای VWMA
+
+// ===================================================================
+//                           محاسبات اندیکاتورها
+// ===================================================================
+
+// قدرت خرید/فروش
+bullishCount = 0
+bearishCount = 0
+for i = 0 to length - 1
+    bullishCount += close[i] > open[i] ? 1 : 0
+    bearishCount += close[i] < open[i] ? 1 : 0
+
+total = bullishCount + bearishCount
+bullPower = total > 0 ? (bullishCount / total) * 100 : 0
+bearPower = total > 0 ? (bearishCount / total) * 100 : 0
+currPower = bullPower > bearPower ? "خریدار" : bullPower < bearPower ? "فروشنده" : "برابر"
+
+// تابعی برای فرمت کردن حجم
+formatVolume(volume) =>
+    if volume >= 1e9
+        str.tostring(volume / 1e9, "#.##") + "B"
+    else if volume >= 1e6
+        str.tostring(volume / 1e6, "#.##") + "M"
+    else if volume >= 1e3
+        str.tostring(volume / 1e3, "#.##") + "K"
+    else
+        str.tostring(volume, "#.##")
+
+// روند با SMA
+sma = ta.sma(close, smaLength)
+trend = close > sma ? "صعودی" : close < sma ? "نزولی" : "خنثی"
+trendColor = trend == "صعودی" ? color.green : trend == "نزولی" ? color.red : color.gray
+
+// تایید با RSI و MACD
+rsi = ta.rsi(close, 14)
+rsiSignal = rsi > 50 ? "✅ RSI صعودی" : rsi < 50 ? "❌ RSI نزولی" : "⚠️ RSI خنثی"
+
+[macdLine, signalLine, _] = ta.macd(close, 12, 26, 9)
+macdSignal = macdLine > signalLine ? "✅ MACD صعودی" : macdLine < signalLine ? "❌ MACD نزولی" : "⚠️ MACD خنثی"
+
+// تایید با Volume
+vol = volume
+volMA = ta.sma(vol, 20)
+volumeSignal = vol > volMA ? "📈 حجم بالا (تایید)" : "📉 حجم پایین (ضعیف)"
+
+// تایید با Ichimoku
+conversionLine = (ta.highest(high, 9) + ta.lowest(low, 9)) / 2
+baseLine = (ta.highest(high, 26) + ta.lowest(low, 26)) / 2
+senkouA = (conversionLine + baseLine) / 2
+senkouB = (ta.highest(high, 52) + ta.lowest(low, 52)) / 2
+ichimokuSignal = close > math.max(senkouA, senkouB) ? "☁️ بالای ابر (مثبت)" :
+                 close < math.min(senkouA, senkouB) ? "🌧️ زیر ابر (منفی)" :
+                 "🌫️ داخل ابر (خنثی)"
+
+// محاسبه و تایید با VWAP
+vwapValue = ta.vwap(close)
+vwapSignal = close > vwapValue ? "✅ بالای VWAP (صعودی)" : close < vwapValue ? "❌ زیر VWAP (نزولی)" : " روی VWAP (خنثی)"
+// vwapColor = close > vwapValue ? color.new(color.aqua, 40) : color.new(color.purple, 40) : color.new(color.gray, 40)
+vwapColor = close > vwapValue ? color.new(color.aqua, 40) : close < vwapValue ? color.new(color.purple, 40) : color.new(color.gray, 40)
+
+// ⭐️ بخش جدید: محاسبه و تایید با VWMA
+vwmaValue = ta.vwma(close, vwmaLength)
+vwmaSignal = close > vwmaValue ? "✅ بالای VWMA (مثبت)" : "❌ زیر VWMA (منفی)"
+vwmaColor = close > vwmaValue ? color.new(color.teal, 40) : color.new(color.maroon, 40)
+
+// محاسبه حجم میانگین 10 روزه (برای جلوگیری از خطا به بیرون از if منتقل شد)
+avgVol10D = request.security(syminfo.tickerid, "D", ta.sma(volume, 10))
+
+// ===================================================================
+//                       سیستم امتیازدهی هوشمند
+// ===================================================================
+bullScore = 0
+bearScore = 0
+
+// 1. امتیاز روند SMA
+if trend == "صعودی"
+    bullScore += 1
+else if trend == "نزولی"
+    bearScore += 1
+
+// 2. امتیاز قدرت کندل‌ها
+if bullPower > bearPower
+    bullScore += 1
+else if bearPower > bullPower
+    bearScore += 1
+
+// 3. امتیاز RSI (با آستانه قوی‌تر)
+if rsi > 55
+    bullScore += 1
+else if rsi < 45
+    bearScore += 1
+
+// 4. امتیاز MACD
+if macdLine > signalLine
+    bullScore += 1
+else if macdLine < signalLine
+    bearScore += 1
+
+// 5. امتیاز Ichimoku
+if close > math.max(senkouA, senkouB)
+    bullScore += 1
+else if close < math.min(senkouA, senkouB)
+    bearScore += 1
+    
+// 6. امتیاز VWAP
+if close > vwapValue
+    bullScore += 1
+else if close < vwapValue
+    bearScore += 1
+
+// ⭐️ بخش جدید: 7. اضافه کردن امتیاز VWMA به سیستم امتیازدهی
+if close > vwmaValue
+    bullScore += 1
+else if close < vwmaValue
+    bearScore += 1
+
+// محاسبه امتیاز نهایی
+totalScore = bullScore - bearScore
+scoreText = "🔥 امتیاز قدرت: " + str.tostring(bullScore) + " / " + str.tostring(bearScore)
+scoreColor = totalScore > 0 ? color.new(color.green, 25) : totalScore < 0 ? color.new(color.red, 25) : color.new(color.gray, 25)
+
+// ===================================================================
+//                            ساخت و بروزرسانی جدول
+// ===================================================================
+// ساخت جدول (تعداد سطرها را به 12 افزایش دادیم)
+var table t = table.new(position.top_right, 1, 12, border_width=1)
+
+// بروزرسانی جدول فقط در آخرین کندل برای بهینه‌سازی
+if barstate.islast
+    table.cell(t, 0, 0, text=scoreText, text_color=color.white, bgcolor=scoreColor)
+    table.cell(t, 0, 1, text="📊 روند: " + trend, text_color=color.white, bgcolor=trendColor)
+    table.cell(t, 0, 2, text=" قدرت خریدار: " + str.tostring(bullPower, "#.##") + "%", text_color=color.green)
+    table.cell(t, 0, 3, text="❤️ قدرت با: " + currPower, text_color=color.white, bgcolor=color.gray)
+    table.cell(t, 0, 4, text=rsiSignal, text_color=color.blue)
+    table.cell(t, 0, 5, text=macdSignal, text_color=color.orange)
+    table.cell(t, 0, 6, text=volumeSignal, text_color=color.fuchsia)
+    table.cell(t, 0, 7, text=ichimokuSignal, text_color=color.yellow)
+    table.cell(t, 0, 8, text=vwapSignal, text_color=color.white, bgcolor=vwapColor)
+    
+    // ⭐️ بخش جدید: نمایش سیگنال VWMA در جدول
+    table.cell(t, 0, 9, text=vwmaSignal, text_color=color.white, bgcolor=vwmaColor)
+
+    // نمایش نتیجه محاسبه حجم
+    avgVolText = "میانگین حجم 10 روزه : " + formatVolume(avgVol10D)
+    table.cell(t, 0, 10, text=avgVolText, text_color=color.white, bgcolor=color.navy)
+
+    // محاسبه حجم امروز
+    var float today_volume_so_far = 0.0
+    isNewDay = ta.change(time("D"))
+    if isNewDay
+        today_volume_so_far := volume
+    else
+        today_volume_so_far += volume
+
+    todayTextvolumeFormat = formatVolume(today_volume_so_far)
+    table.cell(t, 0, 11, text="حجم امروز: " + todayTextvolumeFormat, text_color=color.white, bgcolor=color.rgb(73, 71, 45))
